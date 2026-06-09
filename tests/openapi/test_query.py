@@ -283,6 +283,38 @@ def test_basic_recommend_best_score(collection_name):
     assert recommend_result == query_result
 
 
+def test_recommend_missing_point_id_is_rejected(collection_name):
+    # Legacy recommend API rejects a missing referenced point id
+    response = request_with_validation(
+        api="/collections/{collection_name}/points/recommend",
+        method="POST",
+        path_params={"collection_name": collection_name},
+        body={
+            "positive": [987654321],  # missing id
+            "limit": 10,
+            "strategy": "best_score",
+        },
+    )
+    assert not response.ok, response.text
+
+    # Query API must reject it too, instead of silently dropping the missing id
+    response = request_with_validation(
+        api="/collections/{collection_name}/points/query",
+        method="POST",
+        path_params={"collection_name": collection_name},
+        body={
+            "query": {
+                "recommend": {
+                    "positive": [987654321],  # missing id
+                    "strategy": "best_score",
+                },
+            },
+            "limit": 10,
+        },
+    )
+    assert not response.ok, response.text
+
+
 def test_basic_discover(collection_name):
     response = request_with_validation(
         api="/collections/{collection_name}/points/discover",
