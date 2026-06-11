@@ -772,9 +772,11 @@ impl TableOfContent {
     }
 
     fn get_consensus_proposal_sender(&self) -> Result<&OperationSender, StorageError> {
-        self.consensus_proposal_sender
-            .as_ref()
-            .ok_or_else(|| StorageError::service_error("Qdrant is running in standalone mode"))
+        self.consensus_proposal_sender.as_ref().ok_or_else(|| {
+            StorageError::bad_request(
+                "Cluster operations are not available: Qdrant is running in standalone mode",
+            )
+        })
     }
 
     /// Insert dispatcher for access to table of contents and consensus.
