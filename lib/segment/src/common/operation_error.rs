@@ -48,6 +48,8 @@ pub enum OperationError {
     InconsistentStorage { description: String },
     #[error("Out of memory, free: {free}, {description}")]
     OutOfMemory { description: String, free: u64 },
+    #[error("Out of disk space: {description}")]
+    OutOfDisk { description: String },
     #[error("Operation cancelled: {description}")]
     Cancelled { description: String },
     #[error("Timeout error: {description}")]
@@ -126,6 +128,12 @@ impl OperationError {
                 "Operation '{}' timed out after {timeout:?}",
                 operation.into(),
             ),
+        }
+    }
+
+    pub fn out_of_disk(description: impl Into<String>) -> Self {
+        Self::OutOfDisk {
+            description: description.into(),
         }
     }
 }
@@ -216,6 +224,9 @@ impl From<IoError> for OperationError {
                     free: free_memory,
                 }
             }
+            ErrorKind::StorageFull | ErrorKind::FileTooLarge => Self::OutOfDisk {
+                description: format!("IO Error: {err}"),
+            },
             _ => Self::service_error(format!("IO Error: {err}")),
         }
     }

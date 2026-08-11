@@ -928,6 +928,8 @@ pub enum CollectionError {
     ForwardProxyError { peer_id: PeerId, error: Box<Self> },
     #[error("Out of memory, free: {free}, {description}")]
     OutOfMemory { description: String, free: u64 },
+    #[error("Out of disk space: {description}")]
+    OutOfDisk { description: String },
     #[error("Timeout error: {description}")]
     Timeout { description: String },
     #[error("Precondition failed: {description}")]
@@ -1052,6 +1054,12 @@ impl CollectionError {
         }
     }
 
+    pub fn out_of_disk(description: impl Into<String>) -> Self {
+        Self::OutOfDisk {
+            description: description.into(),
+        }
+    }
+
     /// Returns true if the error is transient and the operation can be retried.
     /// Returns false if the error is not transient and the operation should fail on all replicas.
     pub fn is_transient(&self) -> bool {
@@ -1061,6 +1069,7 @@ impl CollectionError {
             Self::Timeout { .. } => true,
             Self::Cancelled { .. } => true,
             Self::OutOfMemory { .. } => true,
+            Self::OutOfDisk { .. } => true,
             Self::PreConditionFailed { .. } => true,
             Self::ShardUnavailable { .. } => true,
             // Not transient
@@ -1075,6 +1084,10 @@ impl CollectionError {
             Self::InferenceError { .. } => false,
             Self::RateLimitExceeded { .. } => false,
         }
+    }
+
+    pub fn is_out_of_disk(&self) -> bool {
+        matches!(self, Self::OutOfDisk { .. })
     }
 
     pub fn is_pre_condition_failed(&self) -> bool {
@@ -1132,6 +1145,7 @@ impl From<OperationError> for CollectionError {
             OperationError::OutOfMemory { description, free } => {
                 Self::OutOfMemory { description, free }
             }
+            OperationError::OutOfDisk { description } => Self::OutOfDisk { description },
             OperationError::Timeout { description } => Self::Timeout { description },
             OperationError::InconsistentStorage { .. } => Self::ServiceError {
                 error: err.to_string(),
@@ -1192,7 +1206,18 @@ impl From<JsonError> for CollectionError {
 
 impl From<std::io::Error> for CollectionError {
     fn from(err: std::io::Error) -> Self {
-        Self::service_error(format!("File IO error: {err}"))
+        if err.kind() == std::io::ErrorKind::StorageFull
+            || err.kind() == std::io::ErrorKind::FileTooLarge
+        {
+            CollectionError::OutOfDisk {
+                description: format!("File IO error: {err}"),
+            }
+        } else {
+            CollectionError::ServiceError {
+                error: format!("File IO error: {err}"),
+                backtrace: Some(Backtrace::force_capture().to_string()),
+            }
+        }
     }
 }
 
@@ -1300,11 +1325,21 @@ impl From<cancel::Error> for CollectionError {
 
 impl From<tempfile::PathPersistError> for CollectionError {
     fn from(err: tempfile::PathPersistError) -> Self {
-        Self::service_error(format!(
-            "failed to persist temporary file path {}: {}",
-            err.path.display(),
-            err.error,
-        ))
+        if err.error.kind() == std::io::ErrorKind::StorageFull
+            || err.error.kind() == std::io::ErrorKind::FileTooLarge
+        {
+            Self::out_of_disk(format!(
+                "failed to persist temporary file path {}: {}",
+                err.path.display(),
+                err.error,
+            ))
+        } else {
+            Self::service_error(format!(
+                "failed to persist temporary file path {}: {}",
+                err.path.display(),
+                err.error,
+            ))
+        }
     }
 }
 
@@ -1838,5 +1873,22 @@ impl PeerMetadata {
     /// Whether this metadata has a different version than our current Qdrant instance.
     pub fn is_different_version(&self) -> bool {
         self.version != *defaults::QDRANT_VERSION
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_out_of_disk_error_handling() {
+        let err = CollectionError::out_of_disk("No space left on device");
+        assert!(err.is_out_of_disk());
+        assert!(err.is_transient());
+
+        let io_err = std::io::Error::new(std::io::ErrorKind::StorageFull, "disk full");
+        let converted: CollectionError = io_err.into();
+        assert!(converted.is_out_of_disk());
+        assert!(converted.is_transient());
     }
 }
