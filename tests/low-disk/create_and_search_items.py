@@ -1,5 +1,7 @@
 import argparse
 import random
+import time
+
 import requests
 
 
@@ -39,6 +41,7 @@ def insert_points(qdrant_host, collection_name, batch_json):
     EXPECTED_ERROR_MESSAGE = "No space left on device"
     if resp.status_code != 200:
         if resp.status_code == 500 and EXPECTED_ERROR_MESSAGE in resp.text:
+            time.sleep(0.5)  # Allow async storage cleanup before retry
             requests.put(f"{qdrant_host}/collections/{collection_name}/points?wait=true", json=batch_json)
         else:
             error_response = resp.json()

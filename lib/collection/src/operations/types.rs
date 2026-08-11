@@ -23,7 +23,7 @@ use segment::common::anonymize::Anonymize;
 use segment::common::operation_error::{CancelledError, OperationError};
 use segment::data_types::groups::GroupId;
 use segment::data_types::modifier::Modifier;
-use segment::data_types::vectors::{DEFAULT_VECTOR_NAME, DenseVector};
+use segment::data_types::vectors::{DenseVector, DEFAULT_VECTOR_NAME};
 use segment::types::{
     Distance, Filter, HnswConfig, MultiVectorConfig, Payload, PayloadIndexInfo, PayloadKeyType,
     PointIdType, QuantizationConfig, SearchParams, SeqNumberType, ShardKey,
@@ -1888,6 +1888,29 @@ mod tests {
 
         let io_err = std::io::Error::new(std::io::ErrorKind::StorageFull, "disk full");
         let converted: CollectionError = io_err.into();
+        assert!(converted.is_out_of_disk());
+        assert!(converted.is_transient());
+    }
+
+    #[test]
+    fn test_operation_error_to_collection_error_out_of_disk() {
+        let op_err =
+            segment::common::operation_error::OperationError::out_of_disk("segment disk full");
+        let converted: CollectionError = op_err.into();
+        assert!(converted.is_out_of_disk());
+        assert!(converted.is_transient());
+    }
+
+    #[test]
+    fn test_path_persist_error_out_of_disk() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::StorageFull, "disk full");
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let temp_path = tmp.into_temp_path();
+        let persist_err = tempfile::PathPersistError {
+            path: temp_path,
+            error: io_err,
+        };
+        let converted: CollectionError = persist_err.into();
         assert!(converted.is_out_of_disk());
         assert!(converted.is_transient());
     }
